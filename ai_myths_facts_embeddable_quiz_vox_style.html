@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Myths & Facts — Vox-style Quiz</title>
+  <!--
+  AI Myths & Facts — single-file, embeddable quiz
+  Modes:
+    • Demo (default): single-device for rehearsals. No networking required.
+    • Live: optional Firebase Realtime Database sync for multi-device play. Paste your
+      firebaseConfig below and use a hosted URL so learners can scan the QR to join.
+
+  Embedding in Canva / slides:
+    1) Host this file (e.g., GitHub Pages/Netlify) or upload to Canva if supported.
+    2) Add an Embed/iFrame to your slide and paste the hosted link.
+    3) Present the Host view; learners scan the QR to open Player view on their phones.
+
+  Design notes (adult learners, Vox-style):
+    • Palette: warm thin yellow (#FFD84D), white, ink black.
+    • Typewriter vibe: use system monospace; crisp, minimal motion; paper-cutout cards.
+    • Tone: clear and engaging, minimal gimmicks.
+  -->
+  <style>
+    :root {
+      --ink: #111112;
+      --paper: #ffffff;
+      --accent: #ffd84d; /* thin yellow */
+      --muted: #6b7280;
+      --good: #0ea5e9;
+      --bad: #ef4444;
+      --ok: #10b981;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      color: var(--ink);
+      background: var(--paper);
+      line-height: 1.4;
+    }
+    .wrap {
+      max-width: 1100px; margin: 0 auto; padding: 20px 16px 64px;
+    }
+
+    /* Header */
+    header {
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      position: sticky; top: 0; background: rgba(255,255,255,0.9); backdrop-filter: blur(6px);
+      border-bottom: 3px solid var(--accent); padding: 12px 0; z-index: 50;
+    }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .brand .mark {
+      width: 40px; height: 40px; background: var(--accent);
+      border: 2px solid var(--ink);
+      box-shadow: 2px 2px 0 var(--ink);
+    }
+    .brand h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+    .mode-pill { font-size: 12px; color: var(--muted); }
+
+    /* Cutout cards */
+    .card {
+      background: var(--paper);
+      border: 2px solid var(--ink);
+      box-shadow: 4px 4px 0 var(--ink);
+      padding: 16px; margin: 16px 0; border-radius: 6px;
+    }
+    .card.emph { border-width: 3px; }
+    .grid { display:grid; gap:16px; }
+    @media (min-width: 840px) {
+      .grid.two { grid-template-columns: 1.2fr .8fr; }
+      .grid.split { grid-template-columns: 1fr 1fr; }
+    }
+
+    /* Buttons */
+    button, .btn {
+      appearance: none; border: 2px solid var(--ink); background: var(--paper); color: var(--ink);
+      padding: 10px 14px; font-weight: 700; cursor: pointer; border-radius: 6px;
+      box-shadow: 2px 2px 0 var(--ink); text-decoration: none; display:inline-flex; align-items:center; gap:8px;
+    }
+    button:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--ink); }
+    button:active { transform: translate(0,0); box-shadow: 1px 1px 0 var(--ink); }
+    .btn-primary { background: var(--accent); }
+    .btn-good { background: #e0f2fe; border-color: #0ea5e9; }
+    .btn-bad { background: #fee2e2; border-color: #ef4444; }
+
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .mono { font-family: inherit; }
+    .label { display:inline-block; background: var(--accent); border:2px solid var(--ink); padding: 2px 8px; }
+
+    /* Host */
+    #host, #player { display:none; }
+
+    .pin {
+      font-size: 28px; letter-spacing: 4px; padding: 2px 8px; display:inline-block; border:2px solid var(--ink);
+    }
+    .qr { width: 180px; height: 180px; border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink); background:#fff; }
+
+    /* Question */
+    .qtext { font-size: clamp(18px, 3vw, 28px); margin: 6px 0 12px; }
+
+    /* Leaderboard */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px dashed #cbd5e1; padding: 8px 6px; text-align: left; }
+
+    /* Player */
+    .answer-grid { display:grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width:520px){ .answer-grid { grid-template-columns: 1fr 1fr; } }
+
+    /* Subtle motion */
+    .fade { animation: fade .28s ease-in; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: translateY(0);} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="mark" aria-hidden="true"></div>
+        <h1>AI Myths & Facts</h1>
+      </div>
+      <div class="mode-pill" id="modePill">Mode: <strong>Host</strong></div>
+    </header>
+
+    <!-- HOST VIEW -->
+    <section id="host" class="fade" aria-live="polite">
+      <div class="card emph">
+        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;">
+          <div>
+            <div class="label small">Session PIN</div>
+            <div class="pin" id="pin"></div>
+            <div class="small muted" id="joinUrlWrap" style="margin-top:6px;">
+              Join: <span id="joinUrl" class="mono"></span>
+              <button id="copyJoin" class="small" title="Copy join link">Copy</button>
+            </div>
+          </div>
+          <img id="qr" class="qr" alt="QR code to join"/>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <div>
+          <div class="card">
+            <div class="label">Controls</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+              <button id="startLobby" class="btn-primary">Open Lobby</button>
+              <button id="startGame">Start Quiz</button>
+              <button id="reveal">Reveal Answer</button>
+              <button id="nextQ">Next</button>
+              <button id="endGame" class="btn-bad">End</button>
+            </div>
+            <div class="small muted" style="margin-top:6px;">Status: <span id="status">idle</span></div>
+          </div>
+
+          <div class="card">
+            <div class="label">Question</div>
+            <div class="qtext" id="qtext">—</div>
+            <div class="small muted">Timer: <span id="timer">—</span> s</div>
+            <div style="margin-top:8px; display:flex; gap:8px;">
+              <button id="mythBtn" class="btn-bad">Mark: Myth</button>
+              <button id="factBtn" class="btn-good">Mark: Fact</button>
+            </div>
+            <div id="explain" class="small" style="margin-top:8px; display:none;"></div>
+          </div>
+
+          <div class="card">
+            <div class="label">Content Editor (optional before starting)</div>
+            <textarea id="editor" rows="8" style="width:100%; font-family:inherit; border:2px solid var(--ink); padding:8px;">
+[
+  {"text":"AI once passed the bar exam.", "answer":"Fact", "explain":"Some models achieved a passing score on simulated Uniform Bar Exam sets. Not a human licensure attempt, but the score cleared a pass threshold on official-style materials.", "time":15},
+  {"text":"AI always tells the truth.", "answer":"Myth", "explain":"Models can hallucinate. Always verify claims, especially in high-stakes contexts.", "time":15},
+  {"text":"AI-generated legal briefs have included fake citations.", "answer":"Fact", "explain":"There have been public cases where fabricated citations appeared in filings created with AI tools.", "time":15},
+  {"text":"AI models understand context exactly like humans.", "answer":"Myth", "explain":"They model statistical patterns; human-like understanding is not guaranteed.", "time":15},
+  {"text":"Prompt quality can significantly change output quality.", "answer":"Fact", "explain":"Clear, constrained prompts improve reliability and reduce ambiguity.", "time":15},
+  {"text":"More data always makes models better.", "answer":"Myth", "explain":"Data quality, relevance, and training strategy matter as much as volume.", "time":15},
+  {"text":"AI can hallucinate incorrect facts.", "answer":"Fact", "explain":"Hallucinations are a known failure mode. Use citations and human review.", "time":15},
+  {"text":"AI will replace all jobs within a few years.", "answer":"Myth", "explain":"Automation shifts tasks; roles tend to evolve, with human oversight remaining important.", "time":15},
+  {"text":"Privacy and security controls are necessary when using AI tools at work.", "answer":"Fact", "explain":"Protect sensitive data, follow policy, and apply access controls.", "time":15},
+  {"text":"All AI decisions are fully explainable today.", "answer":"Myth", "explain":"Many models remain partly opaque; post-hoc explanations have limits.", "time":15}
+]
+            </textarea>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button id="loadContent">Load Content</button>
+              <button id="exportContent">Export JSON</button>
+              <input id="importFile" type="file" accept="application/json" style="display:none;" />
+              <button id="importContent">Import JSON</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="label">Lobby</div>
+            <div id="lobbyList" class="small">No participants yet.</div>
+          </div>
+          <div class="card">
+            <div class="label">Live Responses</div>
+            <div class="small">Myth: <strong id="countMyth">0</strong> &nbsp;·&nbsp; Fact: <strong id="countFact">0</strong></div>
+            <div id="progress" class="small muted" style="margin-top:6px;">—</div>
+          </div>
+          <div class="card">
+            <div class="label">Leaderboard</div>
+            <table>
+              <thead><tr><th>#</th><th>Nickname</th><th>Score</th></tr></thead>
+              <tbody id="board"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLAYER VIEW -->
+    <section id="player" class="fade" aria-live="polite">
+      <div class="card emph">
+        <div class="label">Join</div>
+        <div style="display:grid; gap:8px; grid-template-columns: 1fr; max-width:520px;">
+          <input id="p_pin" class="mono" placeholder="Session PIN" aria-label="Session PIN" style="border:2px solid var(--ink); padding:10px;"/>
+          <input id="p_name" class="mono" placeholder="Nickname" aria-label="Nickname" style="border:2px solid var(--ink); padding:10px;"/>
+          <button id="p_join" class="btn-primary">Join</button>
+          <div id="p_status" class="small muted">—</div>
+        </div>
+      </div>
+
+      <div id="p_game" style="display:none;">
+        <div class="card">
+          <div class="label">Question</div>
+          <div id="p_qtext" class="qtext">—</div>
+          <div class="small muted">Time left: <span id="p_timer">—</span> s</div>
+        </div>
+        <div class="card">
+          <div class="label">Your Answer</div>
+          <div class="answer-grid">
+            <button id="p_myth" class="btn-bad" aria-label="Answer Myth">Myth</button>
+            <button id="p_fact" class="btn-good" aria-label="Answer Fact">Fact</button>
+          </div>
+          <div id="p_feedback" class="small" style="margin-top:8px;">—</div>
+        </div>
+        <div class="card">
+          <div class="label">Score</div>
+          <div id="p_score" class="small">0</div>
+        </div>
+      </div>
+    </section>
+
+    <noscript>
+      <div class="card">This quiz requires JavaScript.</div>
+    </noscript>
+  </div>
+
+  <script>
+  // ====== CONFIG ======
+  const USE_FIREBASE = false; // set true after adding firebaseConfig and hosting publicly
+  const firebaseConfig = {
+    // Paste your Firebase config here to enable live multi-device play.
+  };
+
+  // ====== STATE ======
+  const state = {
+    mode: 'host', // 'host' | 'player'
+    pin: '',
+    step: 'idle', // 'idle' | 'lobby' | 'question' | 'reveal' | 'ended'
+    qIndex: -1,
+    timer: 0,
+    timerHandle: null,
+    content: [],
+    players: {}, // id -> {name, score, answer, answered}
+  };
+
+  // ====== UTIL ======
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => Array.from(document.querySelectorAll(sel));
+  function randPin(){ return Math.floor(100000 + Math.random()*900000).toString(); }
+  function uid(){ return Math.random().toString(36).slice(2,9); }
+  function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function setStatus(msg){ $('#status').textContent = msg; }
+
+  // Build a QR image using a public API (no libs). If offline, we fallback to hidden.
+  function setQR(targetEl, url){
+    const api = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(url);
+    targetEl.src = api;
+  }
+
+  function saveLocal(){
+    try { localStorage.setItem('aimf_content', $('#editor').value); } catch(e){}
+  }
+  function loadLocal(){
+    try { const s = localStorage.getItem('aimf_content'); if(s) $('#editor').value = s; } catch(e){}
+  }
+
+  // ====== RENDER HELPERS ======
+  function renderLobby(){
+    const list = Object.values(state.players);
+    if(!list.length){ $('#lobbyList').textContent = 'No participants yet.'; return; }
+    $('#lobbyList').innerHTML = list.map(p => `• ${escapeHtml(p.name)}`).join('<br/>');
+  }
+  function renderBoard(){
+    const tbody = $('#board');
+    const rows = Object.values(state.players).sort((a,b)=>b.score-a.score).slice(0,20);
+    tbody.innerHTML = rows.map((p,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(p.name)}</td><td>${p.score}</td></tr>`).join('');
+  }
+  function resetAnswers(){
+    Object.values(state.players).forEach(p=>{ p.answered = false; p.answer = null; });
+    $('#countMyth').textContent = '0';
+    $('#countFact').textContent = '0';
+    $('#progress').textContent = '—';
+  }
+  function countResponses(){
+    let m=0,f=0,a=0,tot=Object.keys(state.players).length;
+    Object.values(state.players).forEach(p=>{ if(p.answered){ a++; if(p.answer==='Myth') m++; if(p.answer==='Fact') f++; } });
+    $('#countMyth').textContent = String(m);
+    $('#countFact').textContent = String(f);
+    $('#progress').textContent = `${a}/${tot} responded`;
+  }
+
+  function setQuestion(idx){
+    state.qIndex = idx;
+    const q = state.content[idx];
+    if(!q) return;
+    $('#qtext').textContent = q.text;
+    $('#explain').style.display = 'none';
+    $('#explain').textContent = q.explain;
+    $('#timer').textContent = q.time;
+
+    // broadcast to players (demo mode uses same-page wiring)
+    broadcast({type:'question', q:{index:idx, text:q.text, time:q.time}});
+
+    // reset player answers
+    resetAnswers();
+
+    // start timer
+    clearInterval(state.timerHandle);
+    state.timer = q.time;
+    state.timerHandle = setInterval(()=>{
+      state.timer--; $('#timer').textContent = state.timer;
+      broadcast({type:'tick', t: state.timer});
+      if(state.timer<=0){ clearInterval(state.timerHandle); $('#reveal').click(); }
+    }, 1000);
+  }
+
+  function revealAnswer(){
+    const q = state.content[state.qIndex]; if(!q) return;
+    $('#explain').style.display = 'block';
+    // scoring
+    Object.values(state.players).forEach(p=>{ if(p.answer === q.answer) p.score += 100; });
+    renderBoard();
+    broadcast({type:'reveal', answer:q.answer, explain:q.explain});
+  }
+
+  function endGame(){
+    state.step='ended'; setStatus('ended');
+    clearInterval(state.timerHandle);
+    broadcast({type:'end'});
+  }
+
+  // ====== SIMPLE BUS (Demo/local) ======
+  // In demo mode we communicate host->player within the same page context.
+  const demoBus = {
+    subs: [],
+    publish(msg){ this.subs.forEach(fn=>fn(msg)); },
+    subscribe(fn){ this.subs.push(fn); }
+  };
+  function broadcast(msg){
+    if(USE_FIREBASE){ /* TODO: push to RTDB */ }
+    else { demoBus.publish(msg); }
+  }
+
+  // ====== INIT ======
+  function init(){
+    // Mode selection by URL
+    const url = new URL(location.href);
+    const asPlayer = url.searchParams.get('join') === '1';
+    state.mode = asPlayer ? 'player' : 'host';
+
+    // Show relevant view
+    $('#host').style.display = state.mode==='host' ? 'block' : 'none';
+    $('#player').style.display = state.mode==='player' ? 'block' : 'none';
+    $('#modePill').innerHTML = `Mode: <strong>${state.mode==='host'?'Host':'Player'}</strong>`;
+
+    loadLocal();
+
+    if(state.mode==='host') initHost();
+    else initPlayer();
+  }
+
+  // ====== HOST ======
+  function initHost(){
+    state.pin = randPin();
+    $('#pin').textContent = state.pin;
+    const base = location.origin + location.pathname;
+    const joinUrl = `${base}?join=1&pin=${state.pin}`;
+    $('#joinUrl').textContent = joinUrl;
+    setQR($('#qr'), joinUrl);
+    $('#copyJoin').onclick = async ()=>{ await navigator.clipboard.writeText(joinUrl); $('#copyJoin').textContent='Copied'; setTimeout(()=>$('#copyJoin').textContent='Copy',1000); };
+
+    // Controls
+    $('#startLobby').onclick = ()=>{ state.step='lobby'; setStatus('lobby open'); broadcast({type:'lobby', pin:state.pin}); };
+    $('#startGame').onclick = ()=>{
+      if(state.content.length===0){ try{ state.content = JSON.parse($('#editor').value);}catch(e){ alert('Invalid JSON in Content Editor'); return; } }
+      state.step='question'; setStatus('question'); setQuestion(0);
+    };
+    $('#nextQ').onclick = ()=>{ if(state.qIndex < state.content.length-1){ setQuestion(state.qIndex+1);} else { endGame(); } };
+    $('#reveal').onclick = ()=>{ revealAnswer(); };
+    $('#endGame').onclick = ()=>{ endGame(); };
+
+    // Marking buttons allow quick correctness toggling (for live adjustment if needed)
+    $('#mythBtn').onclick = ()=>{ const q=state.content[state.qIndex]; if(q){ q.answer='Myth'; $('#explain').style.display='block'; broadcast({type:'reveal', answer:q.answer, explain:q.explain}); renderBoard(); } };
+    $('#factBtn').onclick = ()=>{ const q=state.content[state.qIndex]; if(q){ q.answer='Fact'; $('#explain').style.display='block'; broadcast({type:'reveal', answer:q.answer, explain:q.explain}); renderBoard(); } };
+
+    // Content tools
+    $('#loadContent').onclick = ()=>{ try{ state.content = JSON.parse($('#editor').value); saveLocal(); alert('Content loaded.'); } catch(e){ alert('Invalid JSON.'); } };
+    $('#exportContent').onclick = ()=>{
+      const blob = new Blob([$('#editor').value], {type:'application/json'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'aimf-questions.json'; a.click();
+    };
+    $('#importContent').onclick = ()=>{ $('#importFile').click(); };
+    $('#importFile').onchange = async (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      const text = await file.text(); $('#editor').value = text; saveLocal();
+    };
+
+    // Demo: allow adding test participants in lobby (for rehearsal)
+    const lobbyEl = $('#lobbyList');
+    const addDemoBtn = document.createElement('button'); addDemoBtn.textContent='Add Demo Participant'; addDemoBtn.style.marginTop='8px';
+    addDemoBtn.onclick = ()=>{
+      const id = uid(); state.players[id] = {id, name:`Guest-${Object.keys(state.players).length+1}`, score:0, answered:false, answer:null};
+      renderLobby(); renderBoard(); countResponses();
+    };
+    lobbyEl.insertAdjacentElement('afterend', addDemoBtn);
+
+    // Listen to demo bus for player messages
+    demoBus.subscribe(msg=>{
+      if(msg.type==='join' && msg.pin===state.pin){ state.players[msg.id] = {id:msg.id, name: msg.name, score:0, answered:false, answer:null}; renderLobby(); renderBoard(); }
+      if(msg.type==='answer'){ const p = state.players[msg.id]; if(p && !p.answered){ p.answered=true; p.answer=msg.answer; countResponses(); } }
+    });
+  }
+
+  // ====== PLAYER ======
+  function initPlayer(){
+    const url = new URL(location.href);
+    const pinParam = url.searchParams.get('pin') || '';
+    $('#p_pin').value = pinParam;
+
+    let me = { id: uid(), name: '', score: 0 };
+
+    // Join
+    $('#p_join').onclick = ()=>{
+      const pin = $('#p_pin').value.trim();
+      const name = $('#p_name').value.trim() || 'Guest';
+      if(!pin){ $('#p_status').textContent = 'Enter a valid PIN'; return; }
+      me.name = name; $('#p_status').textContent = 'Joined lobby';
+      $('#p_game').style.display = 'block';
+      demoBus.publish({type:'join', id:me.id, name, pin});
+    };
+
+    // Answer
+    $('#p_myth').onclick = ()=> sendAnswer('Myth');
+    $('#p_fact').onclick = ()=> sendAnswer('Fact');
+
+    function sendAnswer(ans){
+      $('#p_feedback').textContent = 'Answer submitted';
+      demoBus.publish({type:'answer', id:me.id, answer: ans});
+    }
+
+    // Receive host messages
+    demoBus.subscribe(msg=>{
+      if(msg.type==='question'){
+        $('#p_qtext').textContent = msg.q.text;
+        $('#p_timer').textContent = msg.q.time;
+        $('#p_feedback').textContent = '—';
+      }
+      if(msg.type==='tick'){
+        $('#p_timer').textContent = msg.t;
+      }
+      if(msg.type==='reveal'){
+        const you = $('#p_feedback').textContent.includes('submitted');
+        $('#p_feedback').textContent = `Correct answer: ${msg.answer}`;
+      }
+      if(msg.type==='end'){
+        $('#p_feedback').textContent = 'Session ended';
+      }
+    });
+  }
+
+  // ====== GO ======
+  window.addEventListener('load', init);
+  </script>
+</body>
+</html>
