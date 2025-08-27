@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Myths & Facts — Vox-style Quiz</title>
+  <!--
+    Embeddable Kahoot-like quiz (adult learners, minimal gimmicks)
+    Flow goals (matches your request):
+      • Host screen (default): ONLY QR + Lobby list while in Lobby.
+      • Player phones: Join screen → Lobby view that LIVE updates as people join.
+      • When Host starts: Host switches to clean Question-only view.
+      • After each Reveal: show a full-screen Leaderboard on Host, then Next.
+      • Color/theme: thin yellow (#FFD84D), white, typed mono, cutout cards.
+
+    Networking:
+      • Multi-device sync uses Firebase Realtime Database (RTDB).
+      • If firebaseConfig is left empty, the app runs in Demo(single-device) mode.
+
+    How to enable multi-device:
+      1) Create Firebase project → Web app → enable Realtime Database (test rules OK for demos).
+      2) Copy config into firebaseConfig below and set USE_FIREBASE=true.
+      3) Host this file (GitHub Pages OK). The QR will point to your hosted URL.
+  -->
+  <style>
+    :root{ --ink:#111112; --paper:#fff; --accent:#ffd84d; --muted:#6b7280; --good:#0ea5e9; --bad:#ef4444; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; color:var(--ink); background:var(--paper); line-height:1.45}
+    .wrap{max-width:1100px;margin:0 auto;padding:20px 16px 64px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;background:rgba(255,255,255,.94);backdrop-filter:blur(6px);border-bottom:3px solid var(--accent);padding:12px 0;z-index:50}
+    .brand{display:flex;align-items:center;gap:12px}
+    .mark{width:40px;height:40px;background:var(--accent);border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink)}
+    h1{font-size:18px;margin:0;letter-spacing:.2px}
+    .mode-pill{font-size:12px;color:var(--muted)}
+    .card{background:var(--paper);border:2px solid var(--ink);box-shadow:4px 4px 0 var(--ink);padding:16px;margin:16px 0;border-radius:6px}
+    .label{display:inline-block;background:var(--accent);border:2px solid var(--ink);padding:2px 8px}
+    .small{font-size:12px}.muted{color:var(--muted)}.mono{font-family:inherit}
+    .grid{display:grid;gap:16px}
+    @media(min-width:840px){.two{grid-template-columns:1fr 1fr}}
+    button,.btn{appearance:none;border:2px solid var(--ink);background:var(--paper);color:var(--ink);padding:10px 14px;font-weight:700;cursor:pointer;border-radius:6px;box-shadow:2px 2px 0 var(--ink);text-decoration:none;display:inline-flex;align-items:center;gap:8px}
+    button:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 var(--ink)}
+    button:active{transform:translate(0,0);box-shadow:1px 1px 0 var(--ink)}
+    .btn-primary{background:var(--accent)}.btn-good{background:#e0f2fe;border-color:#0ea5e9}.btn-bad{background:#fee2e2;border-color:#ef4444}
+    .pin{font-size:28px;letter-spacing:4px;padding:2px 8px;display:inline-block;border:2px solid var(--ink)}
+    .qr{width:200px;height:200px;border:2px solid var(--ink);box-shadow:2px 2px 0 var(--ink);background:#fff}
+    .qtext{font-size:clamp(20px,3.2vw,34px);margin:6px 0 12px}
+    table{width:100%;border-collapse:collapse} th,td{border-bottom:1px dashed #cbd5e1;padding:8px 6px;text-align:left}
+    .center{display:flex;align-items:center;justify-content:center}
+    .hidden{display:none !important}
+    .full{min-height:52vh;display:flex;flex-direction:column;gap:16px}
+    .fade{animation:fade .28s ease-in}@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  </style>
+  <!-- Firebase (loaded only if using live mode) -->
+  <script>
+    const USE_FIREBASE = false; // set to true after adding firebaseConfig
+    const firebaseConfig = {
+      // apiKey: "",
+      // authDomain: "",
+      // databaseURL: "",
+      // projectId: "",
+      // storageBucket: "",
+      // messagingSenderId: "",
+      // appId: ""
+    };
+  </script>
+  <script type="module" id="fb-sdk" class="hidden">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+    import { getDatabase, ref, set, get, child, update, onValue, push, remove } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-database.js";
+    window.__fbmods = { initializeApp, getDatabase, ref, set, get, child, update, onValue, push, remove };
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><div class="mark" aria-hidden="true"></div><h1>AI Myths & Facts</h1></div>
+      <div class="mode-pill" id="modePill">Mode: <strong>Host</strong></div>
+    </header>
+
+    <!-- HOST VIEW -->
+    <section id="host" class="fade">
+      <!-- LOBBY (default) -->
+      <div id="hostLobby" class="full">
+        <div class="card">
+          <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+            <div>
+              <div class="label small">Session PIN</div>
+              <div class="pin" id="pin"></div>
+              <div class="small muted" style="margin-top:6px;">Join: <span id="joinUrl" class="mono"></span> <button id="copyJoin" class="small">Copy</button></div>
+            </div>
+            <img id="qr" class="qr" alt="QR to join"/>
+          </div>
+        </div>
+        <div class="grid two">
+          <div class="card">
+            <div class="label">Controls</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+              <button id="openLobby" class="btn-primary">Open Lobby</button>
+              <button id="startQuiz">Start Quiz</button>
+              <button id="endGame" class="btn-bad">End</button>
+            </div>
+            <div class="small muted" style="margin-top:6px;">Status: <span id="status">idle</span></div>
+          </div>
+          <div class="card">
+            <div class="label">Lobby</div>
+            <div id="lobbyList" class="small">No participants yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- QUESTION SCREEN (host-only during play) -->
+      <div id="hostQuestion" class="full hidden">
+        <div class="card">
+          <div class="label">Question</div>
+          <div class="qtext" id="qtext">—</div>
+          <div class="small muted">Time: <span id="timer">—</span> s</div>
+        </div>
+        <div class="grid two">
+          <div class="card">
+            <div class="label">Live Responses</div>
+            <div class="small">Myth: <strong id="countMyth">0</strong> · Fact: <strong id="countFact">0</strong></div>
+            <div id="progress" class="small muted" style="margin-top:6px;">—</div>
+          </div>
+          <div class="card">
+            <div class="label">Controls</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+              <button id="reveal">Reveal Answer</button>
+              <button id="nextQ" class="btn-primary">Next</button>
+              <button id="quitFromQ" class="btn-bad">End</button>
+            </div>
+          </div>
+        </div>
+        <div id="explainWrap" class="card hidden"><div class="label">Explanation</div><div id="explain" class="small"></div></div>
+      </div>
+
+      <!-- LEADERBOARD (between questions) -->
+      <div id="hostBoard" class="full hidden">
+        <div class="card"><div class="label">Leaderboard</div>
+          <table><thead><tr><th>#</th><th>Nickname</th><th>Score</th></tr></thead><tbody id="board"></tbody></table>
+        </div>
+        <div><button id="continue" class="btn-primary">Continue</button></div>
+      </div>
+    </section>
+
+    <!-- PLAYER VIEW -->
+    <section id="player" class="fade hidden">
+      <div id="joinCard" class="card">
+        <div class="label">Join</div>
+        <div style="display:grid;gap:8px;max-width:520px;">
+          <input id="p_pin" class="mono" placeholder="Session PIN" aria-label="Session PIN" style="border:2px solid var(--ink);padding:10px;"/>
+          <input id="p_name" class="mono" placeholder="Nickname" aria-label="Nickname" style="border:2px solid var(--ink);padding:10px;"/>
+          <button id="p_join" class="btn-primary">Join</button>
+          <div id="p_status" class="small muted">—</div>
+        </div>
+      </div>
+
+      <div id="p_lobby" class="card hidden">
+        <div class="label">Lobby</div>
+        <div id="p_lobby_text" class="small">Waiting for host to start…</div>
+      </div>
+
+      <div id="p_game" class="hidden">
+        <div class="card"><div class="label">Question</div><div id="p_qtext" class="qtext">—</div><div class="small muted">Time left: <span id="p_timer">—</span> s</div></div>
+        <div class="card"><div class="label">Your Answer</div>
+          <div style="display:grid;gap:12px;grid-template-columns:1fr 1fr;max-width:520px;">
+            <button id="p_myth" class="btn-bad">Myth</button>
+            <button id="p_fact" class="btn-good">Fact</button>
+          </div>
+          <div id="p_feedback" class="small" style="margin-top:8px;">—</div>
+        </div>
+        <div class="card"><div class="label">Score</div><div id="p_score" class="small">0</div></div>
+      </div>
+    </section>
+
+    <noscript><div class="card">This quiz requires JavaScript.</div></noscript>
+  </div>
+
+  <script>
+  // ---------- UTIL ----------
+  const $ = s=>document.querySelector(s); const $$=s=>Array.from(document.querySelectorAll(s));
+  const hasFB = typeof USE_FIREBASE!=="undefined" && USE_FIREBASE;
+  const escapeHtml = s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const randPin = ()=> Math.floor(100000 + Math.random()*900000).toString();
+  const uid = ()=> Math.random().toString(36).slice(2,9);
+  const setQR = (img,url)=> img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(url);
+
+  // ---------- CONTENT (host-side) ----------
+  const DEFAULT_CONTENT = [
+    {text:"AI once passed the bar exam.",answer:"Fact",explain:"Some models achieved a passing score on simulated UBE sets. Not a human licensure attempt, but the score cleared a pass threshold on official-style materials.",time:15},
+    {text:"AI always tells the truth.",answer:"Myth",explain:"Models can hallucinate. Always verify claims, especially in high-stakes contexts.",time:15},
+    {text:"AI-generated legal briefs have included fake citations.",answer:"Fact",explain:"There have been public cases where fabricated citations appeared in filings created with AI tools.",time:15},
+    {text:"AI models understand context exactly like humans.",answer:"Myth",explain:"They model statistical patterns; human-like understanding is not guaranteed.",time:15},
+    {text:"Prompt quality can significantly change output quality.",answer:"Fact",explain:"Clear, constrained prompts improve reliability and reduce ambiguity.",time:15}
+  ];
+
+  // ---------- STATE ----------
+  const app = { mode:'host', pin:'', step:'idle', qIndex:-1, timer:0, timerHandle:null, content:DEFAULT_CONTENT.slice(), players:{} };
+
+  // ---------- DEMO BUS (same-device fallback) ----------
+  const demoBus = { subs:[], publish(m){this.subs.forEach(fn=>fn(m))}, subscribe(fn){this.subs.push(fn)} };
+  const broadcast = (msg)=>{ if(hasFB){ sendFB(msg); } else { demoBus.publish(msg); } };
+
+  // ---------- FIREBASE RUNTIME ----------
+  let db, fbRefs={};
+  async function fbInit(){
+    if(!hasFB) return;
+    // load module tag (already on page). The module exposes window.__fbmods
+    const m = window.__fbmods; if(!m){ console.warn('Firebase SDK not loaded'); return; }
+    const appFb = m.initializeApp(firebaseConfig); db = m.getDatabase(appFb);
+  }
+  function fbSessionRef(pin){ return window.__fbmods.ref(db, 'sessions/'+pin); }
+  function sendFB(msg){
+    const r = fbSessionRef(app.pin);
+    const m = window.__fbmods;
+    if(!r||!m) return;
+    if(msg.type==='state'){ return m.update(r, { state: msg.state }); }
+    if(msg.type==='question'){ return m.update(r, { question: msg.q, reveal:null, timer: msg.q.time }); }
+    if(msg.type==='tick'){ return m.update(r, { timer: msg.t }); }
+    if(msg.type==='reveal'){ return m.update(r, { reveal: {answer:msg.answer, explain:msg.explain} }); }
+    if(msg.type==='end'){ return m.update(r, { state: {step:'ended'} }); }
+    if(msg.type==='join'){ const pr = window.__fbmods.ref(db, 'sessions/'+app.pin+'/players/'+msg.id); return m.set(pr, {name:msg.name, score:0, answered:false, answer:null}); }
+    if(msg.type==='answer'){ const pr = window.__fbmods.ref(db, 'sessions/'+app.pin+'/players/'+msg.id); return m.update(pr, { answered:true, answer:msg.answer }); }
+  }
+
+  // Host listeners (watch players)
+  function fbHostBind(){
+    const m = window.__fbmods; if(!hasFB||!m) return;
+    m.onValue(m.ref(db,'sessions/'+app.pin+'/players'), snap=>{
+      const val = snap.val()||{}; app.players = Object.fromEntries(Object.entries(val).map(([id,p])=>[id,{id,name:p.name,score:p.score||0,answered:!!p.answered,answer:p.answer||null}]));
+      renderLobby(); renderBoard(); countResponses();
+    });
+    m.onValue(m.ref(db,'sessions/'+app.pin+'/timer'), snap=>{ const t=snap.val(); if(typeof t==='number'){ $('#timer').textContent=t; }});
+    m.onValue(m.ref(db,'sessions/'+app.pin+'/question'), snap=>{ const q=snap.val(); if(q && app.mode==='player'){ setPlayerQuestion(q); }});
+    m.onValue(m.ref(db,'sessions/'+app.pin+'/reveal'), snap=>{ const rv=snap.val(); if(rv){ onRevealCommon(rv); }});
+    m.onValue(m.ref(db,'sessions/'+app.pin+'/state'), snap=>{ const st=snap.val(); if(st){ onStateCommon(st); }});
+  }
+
+  // Player listeners use same bindings (on initPlayer we subscribe and set app.pin)
+
+  // ---------- RENDER ----------
+  function show(el){ el.classList.remove('hidden'); }
+  function hide(el){ el.classList.add('hidden'); }
+  function renderLobby(){
+    const list = Object.values(app.players);
+    $('#lobbyList').innerHTML = list.length? list.map(p=>`• ${escapeHtml(p.name)}`).join('<br/>') : 'No participants yet.';
+    $('#p_lobby_text').textContent = `Players joined: ${list.length}`;
+  }
+  function renderBoard(){
+    const tbody = $('#board');
+    const rows = Object.values(app.players).sort((a,b)=>b.score-a.score).slice(0,20);
+    tbody.innerHTML = rows.map((p,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(p.name)}</td><td>${p.score}</td></tr>`).join('');
+  }
+  function resetAnswers(){ Object.values(app.players).forEach(p=>{ p.answered=false;p.answer=null; }); updateCounts(); }
+  function updateCounts(){ let m=0,f=0,a=0,tot=Object.keys(app.players).length; Object.values(app.players).forEach(p=>{ if(p.answered){a++; if(p.answer==='Myth')m++; else if(p.answer==='Fact')f++; }}); $('#countMyth').textContent=m; $('#countFact').textContent=f; $('#progress').textContent=`${a}/${tot} responded`; }
+
+  function setQuestion(i){
+    app.qIndex = i; const q = app.content[i]; if(!q) return;
+    $('#qtext').textContent = q.text; $('#explain').textContent = q.explain; $('#explainWrap').classList.add('hidden');
+    // switch to Question screen
+    hide($('#hostLobby')); hide($('#hostBoard')); show($('#hostQuestion'));
+    // broadcast
+    broadcast({type:'state', state:{step:'question', qIndex:i}});
+    broadcast({type:'question', q:{index:i, text:q.text, time:q.time}});
+    resetAnswers();
+    // start timer
+    clearInterval(app.timerHandle); app.timer=q.time; $('#timer').textContent=app.timer;
+    app.timerHandle = setInterval(()=>{ app.timer--; $('#timer').textContent=app.timer; broadcast({type:'tick', t:app.timer}); if(app.timer<=0){ clearInterval(app.timerHandle); reveal(); } },1000);
+  }
+  function reveal(){
+    const q = app.content[app.qIndex]; if(!q) return;
+    // score
+    Object.values(app.players).forEach(p=>{ if(p.answer===q.answer) p.score += 100; });
+    // push scores to firebase if live
+    if(hasFB){ const m=window.__fbmods; Object.entries(app.players).forEach(([id,p])=>{ m.update(m.ref(db,'sessions/'+app.pin+'/players/'+id), {score:p.score}); }); }
+    $('#explainWrap').classList.remove('hidden'); renderBoard();
+    broadcast({type:'reveal', answer:q.answer, explain:q.explain});
+    // show leaderboard after reveal
+    setTimeout(()=>{ hide($('#hostQuestion')); show($('#hostBoard')); }, 600);
+  }
+  function endGame(){ clearInterval(app.timerHandle); broadcast({type:'end'}); hide($('#hostQuestion')); hide($('#hostLobby')); show($('#hostBoard')); }
+
+  // Common state changes received by players
+  function onRevealCommon(rv){ if(app.mode==='player'){ $('#p_feedback').textContent = `Correct answer: ${rv.answer}`; } }
+  function onStateCommon(st){
+    if(app.mode==='player'){
+      if(st.step==='lobby'){ hide($('#joinCard')); show($('#p_lobby')); }
+      if(st.step==='question'){ hide($('#p_lobby')); show($('#p_game')); }
+      if(st.step==='ended'){ hide($('#p_game')); show($('#p_lobby')); $('#p_lobby_text').textContent='Session ended'; }
+    }
+  }
+
+  // ---------- INIT ----------
+  async function init(){
+    // decide mode via URL
+    const url = new URL(location.href);
+    const asPlayer = url.searchParams.get('join')==='1';
+    app.pin = url.searchParams.get('pin') || '';
+    app.mode = asPlayer? 'player':'host';
+    $('#modePill').innerHTML = `Mode: <strong>${app.mode==='host'?'Host':'Player'}</strong>`;
+
+    if(app.mode==='host'){ initHost(url); }
+    else { initPlayer(url); }
+  }
+
+  async function initHost(url){
+    if(hasFB){ await fbInit(); }
+    // Session pin and join link
+    if(!app.pin) app.pin = randPin();
+    $('#pin').textContent = app.pin;
+    const base = location.origin + location.pathname; const joinUrl = `${base}?join=1&pin=${app.pin}`;
+    $('#joinUrl').textContent = joinUrl; setQR($('#qr'), joinUrl);
+    $('#copyJoin').onclick = async()=>{ await navigator.clipboard.writeText(joinUrl); $('#copyJoin').textContent='Copied'; setTimeout(()=>$('#copyJoin').textContent='Copy',900); };
+
+    // Start in LOBBY view
+    show($('#hostLobby')); hide($('#hostQuestion')); hide($('#hostBoard')); $('#status').textContent='idle';
+
+    // Demo helpers
+    if(!hasFB){
+      const addDemoBtn = document.createElement('button'); addDemoBtn.textContent='Add Demo Participant'; addDemoBtn.style.marginTop='8px';
+      addDemoBtn.onclick = ()=>{ const id=uid(); app.players[id]={id,name:`Guest-${Object.keys(app.players).length+1}`,score:0,answered:false,answer:null}; renderLobby(); renderBoard(); updateCounts(); };
+      $('#lobbyList').insertAdjacentElement('afterend', addDemoBtn);
+      demoBus.subscribe(msg=>{
+        if(msg.type==='join' && msg.pin===app.pin){ app.players[msg.id]={id:msg.id,name:msg.name,score:0,answered:false,answer:null}; renderLobby(); renderBoard(); updateCounts(); }
+        if(msg.type==='answer'){ const p=app.players[msg.id]; if(p && !p.answered){ p.answered=true; p.answer=msg.answer; updateCounts(); } }
+      });
+    } else { fbHostBind(); broadcast({type:'state', state:{step:'lobby'}}); }
+
+    // Buttons
+    $('#openLobby').onclick = ()=>{ $('#status').textContent='lobby open'; broadcast({type:'state', state:{step:'lobby'}}); };
+    $('#startQuiz').onclick = ()=>{ $('#status').textContent='question'; setQuestion(0); };
+    $('#reveal').onclick = ()=> reveal();
+    $('#nextQ').onclick = ()=>{ if(app.qIndex < app.content.length-1){ setQuestion(app.qIndex+1); } else { endGame(); } };
+    $('#continue').onclick = ()=>{ if(app.qIndex < app.content.length-1){ setQuestion(app.qIndex+1);} else { endGame(); } };
+    $('#quitFromQ').onclick = $('#endGame').onclick = ()=> endGame();
+  }
+
+  async function initPlayer(url){
+    if(hasFB){ await fbInit(); }
+    $('#player').classList.remove('hidden'); $('#host').classList.add('hidden');
+    $('#p_pin').value = app.pin || '';
+    // auto-focus name
+    $('#p_name').focus();
+
+    // Demo/local bus listen for host messages
+    demoBus.subscribe(msg=>{
+      if(msg.type==='question'){ setPlayerQuestion(msg.q); }
+      if(msg.type==='tick'){ $('#p_timer').textContent = msg.t; }
+      if(msg.type==='reveal'){ onRevealCommon(msg); }
+      if(msg.type==='end'){ $('#p_feedback').textContent='Session ended'; }
+      if(msg.type==='state'){ onStateCommon(msg.state); }
+    });
+
+    $('#p_join').onclick = ()=> playerJoin();
+
+    async function playerJoin(){
+      const pin = ($('#p_pin').value||'').trim(); const name = ($('#p_name').value||'').trim() || 'Guest';
+      if(!pin){ $('#p_status').textContent='Enter a valid PIN'; return; }
+      app.pin = pin; const id = localStorage.getItem('aimf_id') || uid(); localStorage.setItem('aimf_id', id);
+      app.players[id] = {id, name, score:0, answered:false, answer:null};
+      $('#p_status').textContent='Joined lobby'; hide($('#joinCard')); show($('#p_lobby'));
+      if(hasFB){ await fbInit(); broadcast({type:'join', id, name}); bindPlayerFirebase(id); broadcast({type:'state', state:{step:'lobby'}}); }
+      else { demoBus.publish({type:'join', id, name, pin}); }
+    }
+
+    function bindPlayerFirebase(id){
+      const m = window.__fbmods; if(!m) return;
+      m.onValue(m.ref(db,'sessions/'+app.pin+'/question'), snap=>{ const q=snap.val(); if(q) setPlayerQuestion(q); });
+      m.onValue(m.ref(db,'sessions/'+app.pin+'/timer'), snap=>{ const t=snap.val(); if(typeof t==='number') $('#p_timer').textContent=t; });
+      m.onValue(m.ref(db,'sessions/'+app.pin+'/reveal'), snap=>{ const rv=snap.val(); if(rv) onRevealCommon(rv); });
+      m.onValue(m.ref(db,'sessions/'+app.pin+'/state'), snap=>{ const st=snap.val(); if(st) onStateCommon(st); });
+    }
+
+    $('#p_myth').onclick = ()=> sendAnswer('Myth');
+    $('#p_fact').onclick = ()=> sendAnswer('Fact');
+    function sendAnswer(ans){ $('#p_feedback').textContent='Answer submitted'; if(hasFB){ const id=localStorage.getItem('aimf_id'); broadcast({type:'answer', id, answer:ans}); } else { const id=localStorage.getItem('aimf_id'); demoBus.publish({type:'answer', id, answer:ans}); } }
+  }
+
+  function setPlayerQuestion(q){ $('#p_qtext').textContent=q.text; $('#p_timer').textContent=q.time; $('#p_feedback').textContent='—'; show($('#p_game')); }
+
+  // Boot
+  window.addEventListener('load', async ()=>{
+    if(USE_FIREBASE){ document.getElementById('fb-sdk').classList.remove('hidden'); }
+    init();
+  });
+  </script>
+</body>
+</html>
